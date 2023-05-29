@@ -1,66 +1,70 @@
 
 #pragma once
 
-#include <memory>
 #include <cstdint>
+#include <utility>
+
+#ifndef VERSION
+#define VERSION() 2
+#endif
 
 namespace library {
-
-  namespace detail {
-    namespace v1 {
-      struct VTable;
-      struct Impl;
-      struct Deleter {
-        constexpr void operator()(Impl*) const;
-      };
-    }
-    inline namespace v2 {
-      struct VTable;
-      struct Impl;
-      using v1::Deleter;
-    }
-  }
+  class Widget;
 
   // A forward binary-compatible Widget class
   class Widget {
-    friend detail::VTable;
-    friend detail::Impl;
-    // I'm taking a shortcut here, but it's not safe to assume that all
-    // stdlibs have the same unique_ptr layout. We would need our own
-    // unique_ptr type for use in ABI-stable interfaces.
-    std::unique_ptr<detail::Impl, detail::Deleter> pimpl_;
-    friend Widget makeV1Widget();
-    Widget(detail::Impl*);
+    template <std::uint8_t> struct Impl;
+    Impl<0>* pimpl_;
 
   public:
     Widget();
-    Widget(Widget&&) noexcept = default;
+    Widget(Widget&& other) noexcept;
     Widget(const Widget&);
 
+#if VERSION() == 2
+    // This is a new constructor added in V2
     explicit Widget(int data);
+#endif
 
-    Widget& operator=(Widget&&) noexcept = default;
+    Widget& operator=(Widget&& other) noexcept;
     Widget& operator=(const Widget&);
 
     ~Widget();
 
-    void swap(Widget& otherWidget) noexcept {
-      std::swap(pimpl_, otherWidget.pimpl_);
-    }
-
+    void swap(Widget& otherWidget) noexcept;
     friend void swap(Widget& left, Widget& right) noexcept {
       left.swap(right);
     }
 
+    /*virtual*/ void frobnicate(const Widget& otherWidget) const;
+
+#if VERSION() == 2
     void frob();
 
-    /*virtual*/ void frobnicate(Widget otherWidget);
-
     /*virtual*/ void frobozzle(int value);
+#endif
+
+    // This was a public feature in V1, but it's inaccessible in V2
+    // We have to still support it in V2, or else libs linked to V1
+    // will not link to V2.
+#if VERSION() == 2
+  private:
+#endif
+    struct TagV1 {};
+    Widget(TagV1); // Make a V1 widget
   };
 
-  // Imagine this is exported from some third-party library
-  // built with the v1 Widget type and linked with this code:
-  Widget makeV1Widget();
+  // These members won't ever change, so it's ok to define them inline
+  inline Widget::Widget(Widget&& other) noexcept
+    : pimpl_(std::exchange(other.pimpl_, nullptr))
+  {}
 
+  inline Widget& Widget::operator=(Widget&& other) noexcept {
+    pimpl_ = std::exchange(other.pimpl_, nullptr);
+    return *this;
+  }
+
+  inline void Widget::swap(Widget& other) noexcept {
+    std::swap(pimpl_, other.pimpl_);
+  }
 }
